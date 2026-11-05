@@ -1,0 +1,40 @@
+name: Debug2 yt-dlp with JS runtime (node)
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  debug:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Install ffmpeg + yt-dlp
+        run: sudo apt-get update && sudo apt-get install -y ffmpeg && pip install -r requirements.txt
+      - name: node version
+        run: node --version
+      - name: yt-dlp simulate (default client, with node runtime)
+        continue-on-error: true
+        run: |
+          echo "===== default + node ====="
+          yt-dlp --simulate "https://www.youtube.com/watch?v=BaW_jenozKc" 2>&1 | head -40
+      - name: yt-dlp simulate (web client)
+        continue-on-error: true
+        run: |
+          echo "===== web client ====="
+          yt-dlp --extractor-args "youtube:player_client=web" --simulate "https://www.youtube.com/watch?v=BaW_jenozKc" 2>&1 | head -40
+      - name: yt-dlp REAL tiny download (short test)
+        continue-on-error: true
+        run: |
+          echo "===== real download test (limit 30s) ====="
+          yt-dlp -f "best[filesize<20M]" --download-sections "*00:00-00:00:30" --retries 3 --socket-timeout 30 -o "/tmp/test.mp4" "https://www.youtube.com/watch?v=BaW_jenozKc" 2>&1 | tail -20
+          ls -la /tmp/test.mp4 2>&1
