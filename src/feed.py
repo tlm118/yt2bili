@@ -1,10 +1,12 @@
 """YouTube 订阅源发现：拉取 RSS 并找出尚未处理的新视频。
 
-发现阶段只用 YouTube 官方 RSS（feeds/videos.xml），轻量、免 API Key、对数据中心 IP 友好；
-handle 通过 ?forHandle= 端点解析为 channel_id，避免使用 yt-dlp（在 CI runner 上常被限流/超时）。
+发现阶段只用 YouTube 官方 RSS（feeds/videos.xml），轻量、免 API Key、对数据中心 IP 友好。
+handle 解析采用多策略（forHandle RSS -> yt-dlp -> 频道页 HTML 正则），兼容不同环境；
+解析成功后得到稳定的 channel_id（UC...），后续发现直接走 ?channel_id= 端点，最可靠。
 """
 import json
 import re
+import subprocess
 import urllib.parse
 import urllib.request
 import xml.etree.ElementTree as ET
@@ -48,6 +50,14 @@ def fetch_feed(url: str) -> str:
         return r.read().decode("utf-8")
 
 
+def fetch_text(url: str) -> str:
+    req = urllib.request.Request(
+        url, headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
+    )
+    with urllib.request.urlopen(req, timeout=30) as r:
+        return r.read().decode("utf-8", "ignore")
+
+
 def parse_feed(xml_text: str):
     root = ET.fromstring(xml_text)
     uploader = root.findtext(f"{ATOM}title") or "Unknown"
@@ -68,8 +78,12 @@ def parse_feed(xml_text: str):
 def resolve_channel_id(token):
     """支持直接传 UC/PL id，或 @handle / 完整链接，自动解析为 channel_id。
 
-    优先用 YouTube RSS ?forHandle= 端点（轻量、免 yt-dlp）。解析失败则返回原 token，
-    由 discover_new 用 forHandle 端点兜底。
+    多策略兜底：
+      1) 已是 UC/PL/UU -> 直接返回
+      2) RSS ?forHandle= 端点（带/不带 @）
+      3) yt-dlp 解析（runner 可联网；web 客户端规避 bot 校验）
+      4) 抓频道页 HTML 正则提取 channelId
+    全失败则回退原 token，由 discover_new 用 forHandle 端点兜底。
     """
     t = (token or "").strip()
     if not t:
@@ -80,15 +94,48 @@ def resolve_channel_id(token):
     if "youtube.com" in handle or "youtu.be" in handle:
         handle = handle.rstrip("/").split("?")[0].split("/")[-1]
     handle = handle.lstrip("@")
+
+    # 策略2：RSS forHandle 端点（尝试带/不带 @）
+    for variant in (handle, "@" + handle):
+        try:
+            xml = fetch_feed(forhandle_feed_url(variant))
+            _, cid, _ = parse_feed(xml)
+            if cid and cid.startswith("UC"):
+                print(f"[info] forHandle 解析 {variant} -> {cid}")
+                return cid
+        except Exception as e:  # noqa: BLE001
+            print(f"[warn] forHandle {variant} 失败: {e}")
+
+    # 策略3：yt-dlp 直接解析（延长超时 + web 客户端规避 bot 校验）
     try:
-        xml = fetch_feed(forhandle_feed_url(handle))
-        _, cid, _ = parse_feed(xml)
-        if cid and cid.startswith("UC"):
-            print(f"[info] forHandle 解析 @{handle} -> {cid}")
+        out = subprocess.run(
+            ["yt-dlp", "--no-playlist", "--extractor-args",
+             "youtube:player_client=web_safari,ios",
+             "--print", "%(channel_id)s",
+             f"https://www.youtube.com/@{handle}"],
+            capture_output=True, text=True, timeout=180,
+        )
+        cid = (out.stdout or "").strip().split("\n")[0].strip()
+        if cid.startswith("UC"):
+            print(f"[info] yt-dlp 解析 @{handle} -> {cid}")
             return cid
-        print(f"[warn] forHandle 未返回 channelId: {handle}")
+        print(f"[warn] yt-dlp 返回非预期: {cid!r} | stderr={out.stderr[:200]}")
     except Exception as e:  # noqa: BLE001
-        print(f"[warn] forHandle 解析失败 @{handle}: {e}")
+        print(f"[warn] yt-dlp 解析失败 @{handle}: {e}")
+
+    # 策略4：抓频道页 HTML，正则提取 channelId
+    try:
+        html = fetch_text(f"https://www.youtube.com/@{handle}")
+        m = re.search(r'"channelId"\s*:\s*"(UC[\w-]{22})"', html)
+        if m:
+            cid = m.group(1)
+            print(f"[info] HTML 解析 @{handle} -> {cid}")
+            return cid
+        print(f"[warn] HTML 未找到 channelId: {handle}")
+    except Exception as e:  # noqa: BLE001
+        print(f"[warn] HTML 解析失败 @{handle}: {e}")
+
+    print(f"[warn] 无法解析 handle: {handle}，回退为原 token")
     return t
 
 
