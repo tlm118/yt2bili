@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>YouTube → Bilibili 转传看板</title>
+  <style>
+    :root {
+      --bg: #f6f7f9; --card: #ffffff; --border: #e4e7ec; --text: #1f2329;
+      --muted: #6b7280; --accent: #185fa5; --green: #3b6d11; --red: #a32d2d;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; background: var(--bg); color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+      line-height: 1.6; font-size: 14px;
+    }
+    .wrap { max-width: 1040px; margin: 0 auto; padding: 28px 20px 60px; }
+    h1 { font-size: 20px; font-weight: 600; margin: 0 0 4px; }
+    .sub { color: var(--muted); margin: 0 0 22px; font-size: 13px; }
+    .stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-bottom: 26px; }
+    .stat { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 16px 18px; }
+    .stat .num { font-size: 26px; font-weight: 600; }
+    .stat .lbl { color: var(--muted); font-size: 12px; margin-top: 2px; }
+    .card { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 18px 20px; margin-bottom: 22px; }
+    .card h2 { font-size: 15px; font-weight: 600; margin: 0 0 14px; }
+    table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    th, td { text-align: left; padding: 9px 10px; border-bottom: 1px solid var(--border); }
+    th { color: var(--muted); font-weight: 500; }
+    .badge { display: inline-block; padding: 1px 9px; border-radius: 999px; font-size: 12px; }
+    .ok { background: #eaf3de; color: var(--green); }
+    .fail { background: #fcebeb; color: var(--red); }
+    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
+    form { display: flex; gap: 10px; flex-wrap: wrap; align-items: end; margin-top: 6px; }
+    input, select { padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px; font-size: 13px; }
+    input[type=text] { min-width: 180px; }
+    button { background: var(--accent); color: #fff; border: 0; padding: 8px 16px; border-radius: 8px; cursor: pointer; font-size: 13px; }
+    button:hover { opacity: .92; }
+    .msg { font-size: 12px; margin-top: 8px; min-height: 16px; }
+    .err { color: var(--red); }
+    .okmsg { color: var(--green); }
+    .empty { color: var(--muted); padding: 12px 4px; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>YouTube → Bilibili 转传看板</h1>
+    <p class="sub">网址库与任务状态 · 数据实时读取自 GitHub 仓库</p>
+
+    <div class="stats" id="stats"></div>
+
+    <div class="card">
+      <h2>订阅源（网址库）</h2>
+      <div id="channels"><div class="empty">加载中…</div></div>
+      <form id="addForm">
+        <div>
+          <div class="sub" style="margin:0">名称</div>
+          <input type="text" id="cName" placeholder="如 我的频道" required />
+        </div>
+        <div>
+          <div class="sub" style="margin:0">类型</div>
+          <select id="cType">
+            <option value="channel">频道 channel</option>
+            <option value="playlist">播放列表 playlist</option>
+          </select>
+        </div>
+        <div>
+          <div class="sub" style="margin:0">channel_id / playlist_id</div>
+          <input type="text" id="cId" placeholder="UC… 或 PL…" required />
+        </div>
+        <button type="submit">添加订阅源</button>
+      </form>
+      <div class="msg" id="addMsg"></div>
+    </div>
+
+    <div class="card">
+      <h2>任务状态</h2>
+      <div id="tasks"><div class="empty">加载中…</div></div>
+    </div>
+  </div>
+
+  <script>
+    const $ = (id) => document.getElementById(id);
+
+    async function load() {
+      try {
+        const r = await fetch("/api/status");
+        const data = await r.json();
+        if (data.error) throw new Error(data.error);
+        render(data);
+      } catch (e) {
+        $("stats").innerHTML = `<div class="empty err">加载失败：${e.message}</div>`;
+        $("channels").innerHTML = $("tasks").innerHTML = "";
+      }
+    }
+
+    function render(data) {
+      const s = data.stats || {};
+      $("stats").innerHTML = [
+        ["订阅源", s.channels ?? 0],
+        ["已处理", s.total ?? 0],
+        ["成功", s.done ?? 0],
+        ["失败", s.failed ?? 0],
+      ].map(([l, n]) => `<div class="stat"><div class="num">${n}</div><div class="lbl">${l}</div></div>`).join("");
+
+      const ch = data.channels || [];
+      $("channels").innerHTML = ch.length
+        ? `<table><thead><tr><th>名称</th><th>类型</th><th>ID</th></tr></thead><tbody>${ch
+            .map((c) => `<tr><td>${esc(c.name)}</td><td>${esc(c.type)}</td><td class="mono">${esc(c.channel_id)}</td></tr>`)
+            .join("")}</tbody></table>`
+        : `<div class="empty">暂无订阅源，请在下方添加。</div>`;
+
+      const tasks = Object.entries(data.tasks || {});
+      $("tasks").innerHTML = tasks.length
+        ? `<table><thead><tr><th>标题</th><th>状态</th><th>账号</th><th>BV 号</th><th>错误</th></tr></thead><tbody>${tasks
+            .map(([id, t]) => {
+              const cls = t.status === "done" ? "ok" : "fail";
+              return `<tr><td>${esc(t.title || id)}</td><td><span class="badge ${cls}">${esc(t.status)}</span></td><td>${esc(t.account || "-")}</td><td class="mono">${esc(t.bvid || "-")}</td><td class="mono" style="color:var(--red)">${esc(t.error || "")}</td></tr>`;
+            })
+            .join("")}</tbody></table>`
+        : `<div class="empty">暂无任务记录。</div>`;
+    }
+
+    function esc(v) {
+      return String(v == null ? "" : v).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+    }
+
+    $("addForm").addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const msg = $("addMsg");
+      msg.className = "msg";
+      msg.textContent = "提交中…";
+      try {
+        const r = await fetch("/api/channels", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            name: $("cName").value.trim(),
+            type: $("cType").value,
+            channel_id: $("cId").value.trim(),
+          }),
+        });
+        const data = await r.json();
+        if (!r.ok) throw new Error(data.error || "添加失败");
+        msg.className = "msg okmsg";
+        msg.textContent = "已添加，已写回仓库。";
+        $("addForm").reset();
+        await load();
+      } catch (err) {
+        msg.className = "msg err";
+        msg.textContent = "添加失败：" + err.message + "（写入需配置 GH_TOKEN）";
+      }
+    });
+
+    load();
+    setInterval(load, 60000);
+  </script>
+</body>
+</html>
