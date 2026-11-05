@@ -1,0 +1,41 @@
+name: YouTube → Bilibili Sync
+
+on:
+  schedule:
+    - cron: "*/30 * * * *"   # 每 30 分钟检查一次（高频可调小）
+  workflow_dispatch:         # 支持手动触发
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install ffmpeg
+        run: sudo apt-get update && sudo apt-get install -y ffmpeg
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run pipeline
+        env:
+          BILI_SESSDATA: ${{ secrets.BILI_SESSDATA }}
+          BILI_BILI_JCT: ${{ secrets.BILI_BILI_JCT }}
+          BILI_BUVID3: ${{ secrets.BILI_BUVID3 }}
+          BILI_ACCOUNTS: ${{ secrets.BILI_ACCOUNTS }}
+          TRANSLATE_PROVIDER: ${{ secrets.TRANSLATE_PROVIDER }}
+          BATCH_LIMIT: ${{ vars.BATCH_LIMIT || '15' }}
+        run: python -m src.pipeline
+
+      - name: Commit state
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add state.json
+          git commit -m "chore: update processed state" || echo "no changes"
+          git push
