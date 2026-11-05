@@ -1,0 +1,39 @@
+name: Debug3 yt-dlp alternative clients (tv/tv_embedded/android)
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  debug:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install ffmpeg + yt-dlp
+        run: sudo apt-get update && sudo apt-get install -y ffmpeg && pip install -r requirements.txt
+      - name: yt-dlp simulate (tv client)
+        continue-on-error: true
+        run: |
+          echo "===== tv ====="
+          yt-dlp --extractor-args "youtube:player_client=tv" --simulate "https://www.youtube.com/watch?v=BaW_jenozKc" 2>&1 | head -20
+      - name: yt-dlp simulate (tv_embedded)
+        continue-on-error: true
+        run: |
+          echo "===== tv_embedded ====="
+          yt-dlp --extractor-args "youtube:player_client=tv_embedded" --simulate "https://www.youtube.com/watch?v=BaW_jenozKc" 2>&1 | head -20
+      - name: yt-dlp simulate (android)
+        continue-on-error: true
+        run: |
+          echo "===== android ====="
+          yt-dlp --extractor-args "youtube:player_client=android" --simulate "https://www.youtube.com/watch?v=BaW_jenozKc" 2>&1 | head -20
+      - name: yt-dlp simulate (web_safari + ios)
+        continue-on-error: true
+        run: |
+          echo "===== web_safari,ios ====="
+          yt-dlp --extractor-args "youtube:player_client=web_safari,ios" --simulate "https://www.youtube.com/watch?v=BaW_jenozKc" 2>&1 | head -20
