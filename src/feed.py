@@ -3,11 +3,13 @@
 发现阶段只用 YouTube 官方 RSS（feeds/videos.xml?channel_id=），
 该端点轻量、免 API Key，且在 GitHub Actions 的 runner 上实测可稳定返回 200。
 
-推荐在 channels.json 里直接填稳定的 channel_id（以 UC/PL/UU 开头）；
-若只给了 @handle / 链接，会尝试解析，但在数据中心 IP 上解析可能失败，
-此时请改用频道页提供的真实 channel_id。
+- 若 channels.json 直接填了稳定的 channel_id（UC/PL/UU 开头），发现直接走 ?channel_id=。
+- 若只填了 @handle / 链接，则用 yt-dlp（走 YT_PROXY 代理，绕过 GitHub IP 被 YouTube 拦截）
+  把 handle 解析为真实 channel_id，并缓存到 state.json 的 _resolved，避免每次重复解析。
 """
+import os
 import re
+import subprocess
 import urllib.request
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass
@@ -39,6 +41,11 @@ def extract_id(text: str) -> str:
     return m.group(1) if m else (text or "")
 
 
+def _proxy_args():
+    p = os.environ.get("YT_PROXY")
+    return ["--proxy", p] if p else []
+
+
 def fetch_feed(url: str) -> str:
     req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
     with urllib.request.urlopen(req, timeout=30) as r:
@@ -62,35 +69,46 @@ def parse_feed(xml_text: str):
     return uploader, cid, videos
 
 
-def resolve_channel_id(token):
-    """把 @handle / 链接 / 直接 UC id 解析为稳定的 channel_id。
-
-    数据中心 IP 上 YouTube 对 watch 页与 Innertube 接口常做限流，
-    因此本函数只在『明显已是 UC/PL/UU id』时直接返回；其余情况交给调用方
-    提示用户手动填写真实 channel_id（最可靠）。
-    """
-    t = (token or "").strip()
-    if not t:
-        return t
-    if t[:2] in ("UC", "PL", "UU") or t.startswith("channel/") or t.startswith("playlist/"):
-        return t.split("/")[-1]
-    # 尝试从链接里直接抽取 id
-    m = re.search(r"(UC[\w-]{22}|PL[\w-]+|UU[\w-]{22})", t)
-    if m:
-        return m.group(1)
-    # 其余（纯 @handle）无法在受限网络稳定解析，回退原值并标记
-    return t
+def resolve_handle(handle: str):
+    """用 yt-dlp（走 YT_PROXY 代理）把 @handle 解析为真实 channel_id。失败返回 None。"""
+    h = handle.lstrip("@")
+    try:
+        out = subprocess.run(
+            ["yt-dlp", "--no-playlist", "--no-warnings",
+             "--extractor-args", "youtube:player_client=web_safari,ios",
+             *_proxy_args(),
+             "--print", "%(channel_id)s",
+             f"https://www.youtube.com/@{h}"],
+            capture_output=True, text=True, timeout=180,
+        )
+        cid = (out.stdout or "").strip().split("\n")[0].strip()
+        if cid.startswith("UC"):
+            print(f"[info] 解析 handle @{h} -> {cid}")
+            return cid
+        print(f"[warn] yt-dlp 解析 @{h} 返回非预期: {cid!r} | {out.stderr[:200]}")
+    except Exception as e:  # noqa: BLE001
+        print(f"[warn] yt-dlp 解析 @{h} 失败: {e}")
+    return None
 
 
 def discover_new(channels, state, limit=15):
     """返回 [(频道名, Video), ...]，按发布时间升序，最多 limit 条。"""
     results = []
+    resolved = state.setdefault("_resolved", {})
     for ch in channels:
-        ctype = ch.get("type", "channel")
         raw = ch.get("channel_id") or extract_id(ch.get("url", ""))
-        cid = resolve_channel_id(raw)
-        if not cid or not (cid[:2] in ("UC", "PL", "UU")):
-            print(f"[warn] 跳过（请在 channels.json 填写真实 channel_id，如 UC...）: {ch}")
+        if raw[:2] in ("UC", "PL", "UU"):
+            cid = raw
+        else:
+            h = raw.lstrip("@")
+            if h in resolved:
+                cid = resolved[h]
+            else:
+                cid = resolve_handle(h)
+                if cid:
+                    resolved[h] = cid
+        if not cid or not cid[:2] in ("UC", "PL", "UU"):
+            print(f"[warn] 跳过（无法解析为 channel_id）: {ch}")
             continue
         url = channel_feed_url(cid) if cid.startswith("UC") else playlist_feed_url(cid)
         try:
