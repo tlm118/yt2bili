@@ -2,6 +2,7 @@
 import asyncio
 import json
 import os
+import shutil
 import subprocess
 import tempfile
 
@@ -56,6 +57,9 @@ def download(video_url):
     proxy = os.environ.get("YT_PROXY")
     if proxy:
         cmd += ["--proxy", proxy]
+    # 若已安装 node，启用 JS 运行时以获得完整清晰度列表
+    if shutil.which("node"):
+        cmd += ["--js-runtimes", "node"]
     cmd += ["-o", out_tpl, video_url]
     print(f"[dl] {video_url}")
     subprocess.run(cmd, check=True)
