@@ -1,0 +1,40 @@
+name: Debug YouTube reachability (yt-dlp)
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  debug:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install ffmpeg + yt-dlp
+        run: sudo apt-get update && sudo apt-get install -y ffmpeg && pip install -r requirements.txt
+      - name: yt-dlp simulate (default client)
+        continue-on-error: true
+        run: |
+          echo "===== default ====="
+          yt-dlp --simulate "https://www.youtube.com/watch?v=BaW_jenozKc" 2>&1 | head -40
+      - name: yt-dlp simulate (web_safari)
+        continue-on-error: true
+        run: |
+          echo "===== web_safari ====="
+          yt-dlp --extractor-args "youtube:player_client=web_safari" --simulate "https://www.youtube.com/watch?v=BaW_jenozKc" 2>&1 | head -40
+      - name: yt-dlp simulate (ios,web)
+        continue-on-error: true
+        run: |
+          echo "===== ios,web ====="
+          yt-dlp --extractor-args "youtube:player_client=ios,web" --simulate "https://www.youtube.com/watch?v=BaW_jenozKc" 2>&1 | head -40
+      - name: curl channel RSS (channel_id form)
+        continue-on-error: true
+        run: |
+          echo "===== RSS channel_id (known public channel UC_x5XG1OV2P6uZZ5FSM9Ttw) ====="
+          curl -s -m 25 -A "Mozilla/5.0" "https://www.youtube.com/feeds/videos.xml?channel_id=UC_x5XG1OV2P6uZZ5FSM9Ttw" -o /tmp/rss.xml -w "HTTP %{http_code}\n"
+          head -c 600 /tmp/rss.xml; echo
