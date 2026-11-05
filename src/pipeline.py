@@ -106,8 +106,8 @@ async def main():
                 "title": cfg.get("title_template", "{title}").format(title=title_zh, uploader=ch_name),
                 "desc": cfg.get("desc_template", "").format(url=v.url, uploader=ch_name, title=v.title),
                 "tag": cfg.get("tags", ["YouTube"]),
-                "tid": cfg.get("tid", 17),
-                "copyright": cfg.get("copyright", 2),
+                "tid": cfg.get("tid", 95),
+                "copyright": cfg.get("copyright", 1),
                 "source": v.url,
             }
             cred = bili.make_credential(acc)
