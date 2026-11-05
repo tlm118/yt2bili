@@ -52,9 +52,11 @@ def download(video_url):
         "--merge-output-format", "mp4",
         "--write-thumbnail", "--convert-thumbnails", "jpg",
         "--retries", "5", "--fragment-retries", "5", "--socket-timeout", "30",
-        "-o", out_tpl,
-        video_url,
     ]
+    proxy = os.environ.get("YT_PROXY")
+    if proxy:
+        cmd += ["--proxy", proxy]
+    cmd += ["-o", out_tpl, video_url]
     print(f"[dl] {video_url}")
     subprocess.run(cmd, check=True)
     files = os.listdir(tmp)
