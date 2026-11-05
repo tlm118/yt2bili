@@ -1,0 +1,11 @@
+{
+  "batch_limit": 15,
+  "tid": 188,
+  "copyright": 1,
+  "tags": ["YouTube", "科技"],
+  "title_template": "{title}",
+  "desc_template": "原视频：{url}\nUP：{uploader}\n\n本内容转载自 YouTube，仅供学习交流，版权归原作者所有。",
+  "translation": { "enabled": true, "provider": "mymemory", "source": "en", "target": "zh" },
+  "cover": { "enabled": true },
+  "max_per_account": 0
+}
